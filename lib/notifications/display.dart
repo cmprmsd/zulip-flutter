@@ -239,6 +239,36 @@ class NotificationChannelManager {
   static String _groupKeyForAccount(Account account) =>
     NotificationDisplayManager._groupKey(account.realmUrl, account.userId);
 
+  /// Open the Android settings for the given Zulip channel's custom channel,
+  /// creating the custom channel if needed.
+  static Future<void> openCustomChannelSettingsForChannel(Account account, {
+    required int channelId,
+    required String channelName,
+  }) {
+    return _openCustomChannelSettings(account,
+      id: customChannelIdForChannel(account, channelId),
+      name: _customChannelNameForChannel(channelName));
+  }
+
+  /// Open the Android settings for the given sender's custom channel,
+  /// creating the custom channel if needed.
+  static Future<void> openCustomChannelSettingsForSender(Account account, {
+    required int senderId,
+    required String senderFullName,
+  }) {
+    return _openCustomChannelSettings(account,
+      id: customChannelIdForSender(account, senderId),
+      name: senderFullName);
+  }
+
+  static Future<void> _openCustomChannelSettings(Account account, {
+    required String id,
+    required String name,
+  }) async {
+    if (!await _ensureCustomChannel(account, id: id, name: name)) return;
+    await _androidHost.openNotificationChannelSettings(id);
+  }
+
   /// The notification channel to post a notification for [data] on.
   ///
   /// This is the custom channel for the message's sender, if there is one.
