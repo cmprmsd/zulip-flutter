@@ -284,30 +284,24 @@ void main() {
       addTearDown(testBinding.reset);
 
       // Setup initial channels.
-      await testBinding.androidNotificationHost.createNotificationChannel(
-        NotificationChannel(
-          id: 'obsolete-1',
-          name: 'Obsolete 1',
-          importance: NotificationImportance.high,
-          lightsEnabled: true,
-          vibrationPattern: NotificationChannelManager.kVibrationPattern));
-      await testBinding.androidNotificationHost.createNotificationChannel(
-        NotificationChannel(
-          id: 'obsolete-2',
-          name: 'Obsolete 2',
-          importance: NotificationImportance.high,
-          lightsEnabled: true,
-          vibrationPattern: NotificationChannelManager.kVibrationPattern));
+      for (final id in ['messages-1', 'messages-3']) {
+        await testBinding.androidNotificationHost.createNotificationChannel(
+          NotificationChannel(
+            id: id,
+            name: 'Messages',
+            importance: NotificationImportance.high,
+            lightsEnabled: true,
+            vibrationPattern: NotificationChannelManager.kVibrationPattern));
+      }
       // Clear the log.
       check(testBinding.androidNotificationHost.takeCreatedChannels())
         .length.equals(2);
 
-      // Ensure that any channel whose channel-id differs from the desired
-      // channel-id (NotificationChannelManager.kChannelId) is deleted, and a
-      // new one with the desired channel-id is created.
+      // Ensure that any channel whose channel-id is a known obsolete one
+      // is deleted, and a new one with the desired channel-id is created.
       await NotificationChannelManager.ensureChannel();
       check(testBinding.androidNotificationHost.takeDeletedChannels())
-        .deepEquals(['obsolete-1', 'obsolete-2']);
+        .deepEquals(['messages-1', 'messages-3']);
       check(testBinding.androidNotificationHost.takeCreatedChannels()).single
         ..id.equals(NotificationChannelManager.kChannelId)
         ..name.equals('Messages')
@@ -322,6 +316,18 @@ void main() {
         ..lightsEnabled.equals(true)
         ..vibrationPattern.isNotNull().deepEquals(
             NotificationChannelManager.kVibrationPattern);
+    });
+
+    test('no delete channels not known to be obsolete', () async {
+      addTearDown(testBinding.reset);
+      await testBinding.androidNotificationHost.createNotificationChannel(
+        NotificationChannel(id: 'other', importance: NotificationImportance.high));
+      testBinding.androidNotificationHost.takeCreatedChannels();
+
+      await NotificationChannelManager.ensureChannel();
+      check(testBinding.androidNotificationHost.takeDeletedChannels()).isEmpty();
+      check(testBinding.androidNotificationHost.activeChannels.map((c) => c.id))
+        .deepEquals(['other', NotificationChannelManager.kChannelId]);
     });
   });
 

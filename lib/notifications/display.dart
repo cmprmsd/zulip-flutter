@@ -39,12 +39,18 @@ enum NotificationSound {
 class NotificationChannelManager {
   /// The channel ID we use for our one notification channel, which we use for
   /// all notifications.
-  // Previous values from Zulip Flutter Beta:
-  //   'messages-1'
-  // Previous values from Zulip Mobile:
-  //   'default', 'messages-1', (alpha-only: 'messages-2'), 'messages-3'
+  // When changing this, add the old value to [kObsoleteChannelIds].
   @visibleForTesting
   static const kChannelId = 'messages-4';
+
+  /// Previous values of [kChannelId], whose channels we delete if present.
+  ///
+  /// Channels with other IDs are left alone.
+  @visibleForTesting
+  static const kObsoleteChannelIds = [
+    // From Zulip Mobile; 'messages-1' also from Zulip Flutter Beta.
+    'default', 'messages-1', 'messages-2', 'messages-3',
+  ];
 
   @visibleForTesting
   static const kDefaultNotificationSound = NotificationSound.chime3;
@@ -186,7 +192,7 @@ class NotificationChannelManager {
     for (final channel in channels) {
       if (channel.id == kChannelId) {
         found = true;
-      } else {
+      } else if (kObsoleteChannelIds.contains(channel.id)) {
         await _androidHost.deleteNotificationChannel(channel.id);
       }
     }
