@@ -354,6 +354,14 @@ class NotificationChannelManager {
     }
     return true;
   }
+
+  /// Delete the account's custom channels.
+  ///
+  /// If a custom channel is later recreated, Android restores
+  /// the settings it had before.
+  static Future<void> deleteCustomChannelsForAccount(Account account) async {
+    await _androidHost.deleteNotificationChannelGroup(_groupKeyForAccount(account));
+  }
 }
 
 /// Service for managing the notifications shown to the user.
