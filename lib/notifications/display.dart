@@ -13,6 +13,7 @@ import '../log.dart';
 import '../model/binding.dart';
 import '../model/localizations.dart';
 import '../model/narrow.dart';
+import '../model/settings.dart';
 import '../model/store.dart';
 import '../widgets/color.dart';
 import '../widgets/theme.dart';
@@ -35,10 +36,19 @@ enum NotificationSound {
   final String fileDisplayName;
 }
 
-/// Service for configuring our Android "notification channel".
+/// Service for configuring our Android "notification channels".
+///
+/// Notifications go on our main channel [kChannelId],
+/// except where the user has a custom channel
+/// for the message's sender or Zulip channel; see [_channelIdForMessage].
+/// A custom channel lets the user choose a sound and other settings
+/// for that sender or Zulip channel, in the Android settings UI.
 class NotificationChannelManager {
-  /// The channel ID we use for our one notification channel, which we use for
-  /// all notifications.
+  /// The channel ID of our main notification channel.
+  ///
+  /// Notifications go on this channel unless a custom channel applies;
+  /// see [_channelIdForMessage].
+  /// Custom channels start as copies of this one.
   // When changing this, add the old value to [kObsoleteChannelIds].
   @visibleForTesting
   static const kChannelId = 'messages-4';
@@ -215,6 +225,105 @@ class NotificationChannelManager {
       vibrationPattern: kVibrationPattern,
     ));
   }
+
+  @visibleForTesting
+  static String customChannelIdForChannel(Account account, int channelId) =>
+    '${_groupKeyForAccount(account)}|channel:$channelId';
+
+  @visibleForTesting
+  static String customChannelIdForSender(Account account, int senderId) =>
+    '${_groupKeyForAccount(account)}|user:$senderId';
+
+  static String _customChannelNameForChannel(String channelName) => '#$channelName';
+
+  static String _groupKeyForAccount(Account account) =>
+    NotificationDisplayManager._groupKey(account.realmUrl, account.userId);
+
+  /// The notification channel to post a notification for [data] on.
+  ///
+  /// This is the custom channel for the message's sender, if there is one.
+  /// Otherwise it's the custom channel for the message's Zulip channel,
+  /// if there is one or [BoolGlobalSetting.notificationCategoryPerChannel]
+  /// is set, creating it if needed.
+  /// Otherwise it's [kChannelId].
+  static Future<String> _channelIdForMessage(
+    NotifPayloadNewMessage data,
+    Account account,
+  ) async {
+    final existingNames = {
+      for (final channel in await _androidHost.getNotificationChannels())
+        channel.id: channel.name,
+    };
+
+    final senderChannelId = await _useCustomChannel(existingNames, account,
+      id: customChannelIdForSender(account, data.senderId),
+      name: data.senderFullName,
+      create: false);
+    if (senderChannelId != null) return senderChannelId;
+
+    if (data.recipient case NotifPayloadChannelRecipient(:var channelId, :var channelName)) {
+      final id = customChannelIdForChannel(account, channelId);
+      final create = !existingNames.containsKey(id)
+        && (await ZulipBinding.instance.getGlobalStore()).settings
+             .getBool(BoolGlobalSetting.notificationCategoryPerChannel);
+      final channelChannelId = await _useCustomChannel(existingNames, account,
+        id: id,
+        name: channelName == null ? null : _customChannelNameForChannel(channelName),
+        create: create);
+      if (channelChannelId != null) return channelChannelId;
+    }
+
+    return kChannelId;
+  }
+
+  /// The custom channel [id], if it exists in [existingNames] or [create] is true.
+  ///
+  /// Creates the custom channel if needed, or updates its name to [name].
+  /// A null [name] means the name is unknown:
+  /// an existing channel keeps its name, and none is created.
+  /// Returns null if the channel doesn't exist and wasn't created.
+  static Future<String?> _useCustomChannel(
+    Map<String, String?> existingNames,
+    Account account, {
+    required String id,
+    required String? name,
+    required bool create,
+  }) async {
+    final exists = existingNames.containsKey(id);
+    if (!exists && !(create && name != null)) return null;
+    if (name != null && existingNames[id] != name) {
+      // Create the channel, or keep its name current (e.g., after a rename).
+      final succeeded = await _ensureCustomChannel(account, id: id, name: name);
+      if (!succeeded && !exists) return null;
+    }
+    return id;
+  }
+
+  /// Create a custom channel, or update its name if it already exists.
+  ///
+  /// A new custom channel starts with the settings of [kChannelId],
+  /// including most that the user has changed;
+  /// see [AndroidNotificationHostApi.createNotificationChannelFrom].
+  /// It goes in a channel group for the account.
+  ///
+  /// Returns false if this failed.
+  static Future<bool> _ensureCustomChannel(Account account, {
+    required String id,
+    required String name,
+  }) async {
+    final groupId = _groupKeyForAccount(account);
+    try {
+      await _androidHost.createNotificationChannelGroup(NotificationChannelGroup(
+        id: groupId,
+        name: '${account.realmName ?? account.realmUrl.host} (${account.email})'));
+      await _androidHost.createNotificationChannelFrom(
+        sourceChannelId: kChannelId, id: id, name: name, groupId: groupId);
+    } catch (e, st) {
+      assert(debugLog('$e\n$st')); // TODO(log)
+      return false;
+    }
+    return true;
+  }
 }
 
 /// Service for managing the notifications shown to the user.
@@ -304,10 +413,12 @@ class NotificationDisplayManager {
 
     final intentDataUrl = notificationUrlForNotifPayload(data, messageId: firstMessageId);
 
+    final channelId = await NotificationChannelManager._channelIdForMessage(data, account);
+
     await _androidHost.notify(
       id: kNotificationId,
       tag: conversationKey,
-      channelId: NotificationChannelManager.kChannelId,
+      channelId: channelId,
       groupKey: groupKey,
 
       color: kZulipBrandColor.argbInt,
@@ -350,7 +461,9 @@ class NotificationDisplayManager {
     await _androidHost.notify(
       id: kNotificationId,
       tag: groupKey,
-      channelId: NotificationChannelManager.kChannelId,
+      // The same channel as the conversation notification, so that
+      // if the user blocked or silenced that channel, it applies to this too.
+      channelId: channelId,
       // Leave sound and vibration to the conversation's own notification,
       // which may be on a channel with its own settings.
       groupAlertBehavior: NotificationGroupAlertBehavior.children,

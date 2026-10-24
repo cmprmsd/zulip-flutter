@@ -17,6 +17,7 @@ import 'package:zulip/model/binding.dart';
 import 'package:zulip/model/localizations.dart';
 import 'package:zulip/model/narrow.dart';
 import 'package:zulip/model/push_key.dart';
+import 'package:zulip/model/settings.dart';
 import 'package:zulip/model/store.dart';
 import 'package:zulip/notifications/display.dart';
 import 'package:zulip/notifications/open.dart';
@@ -478,6 +479,7 @@ void main() {
       required bool expectedIsGroupConversation,
       List<int>? expectedIconBitmap = kSolidBlueAvatar,
       String? expectedSummaryText,
+      String? expectedChannelId,
     }) {
       account ??= eg.selfAccount;
       assert(account.userId == data.userId
@@ -529,7 +531,7 @@ void main() {
           (it) => it.isA<AndroidNotificationHostApiNotifyCall>()
             ..id.equals(NotificationDisplayManager.kNotificationId)
             ..tag.equals(expectedTag)
-            ..channelId.equals(NotificationChannelManager.kChannelId)
+            ..channelId.equals(expectedChannelId ?? NotificationChannelManager.kChannelId)
             ..contentTitle.isNull()
             ..contentText.isNull()
             ..messagingStyle.which((it) => it.isNotNull()
@@ -562,7 +564,7 @@ void main() {
           (it) => it.isA<AndroidNotificationHostApiNotifyCall>()
             ..id.equals(NotificationDisplayManager.kNotificationId)
             ..tag.equals(expectedGroupKey)
-            ..channelId.equals(NotificationChannelManager.kChannelId)
+            ..channelId.equals(expectedChannelId ?? NotificationChannelManager.kChannelId)
             ..contentTitle.isNull()
             ..contentText.isNull()
             ..color.equals(kZulipBrandColor.argbInt)
@@ -1112,6 +1114,229 @@ void main() {
         expectedTagComponent: 'dm:${message.allRecipientIds.join(",")}');
     })));
 
+    group('custom channels', () {
+      final expectedGroupId = '${eg.selfAccount.realmUrl}|${eg.selfAccount.userId}';
+
+      void setAutoCreate(bool value) {
+        testBinding.globalStore.settings.setBool(
+          BoolGlobalSetting.notificationCategoryPerChannel, value);
+      }
+
+      /// Simulate a custom channel left from an earlier session,
+      /// e.g. one the user created for a sender.
+      Future<void> addCustomChannel(String id, {required String name}) async {
+        await testBinding.androidNotificationHost.createNotificationChannelGroup(
+          NotificationChannelGroup(id: expectedGroupId, name: 'group'));
+        await testBinding.androidNotificationHost.createNotificationChannelFrom(
+          sourceChannelId: NotificationChannelManager.kChannelId,
+          id: id, name: name, groupId: expectedGroupId);
+      }
+
+      Future<void> receiveAndCheck(FakeAsync async, Message message, {
+        String? streamName,
+        required String? expectedChannelId,
+      }) async {
+        final data = notifPayloadNewMessage(message, streamName: streamName);
+        await receiveNotification(async, data);
+        check(testBinding.androidNotificationHost.takeNotifyCalls()).deepEquals(<Condition<Object?>>[
+          (it) => it.isA<AndroidNotificationHostApiNotifyCall>()
+            ..isGroupSummary.isNull()
+            ..channelId.equals(expectedChannelId ?? NotificationChannelManager.kChannelId),
+          (it) => it.isA<AndroidNotificationHostApiNotifyCall>()
+            ..isGroupSummary.equals(true)
+            ..channelId.equals(expectedChannelId ?? NotificationChannelManager.kChannelId),
+        ]);
+      }
+
+      test('no auto-create when flag off', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(false);
+        final stream = eg.stream();
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: null);
+        check(testBinding.androidNotificationHost.activeChannels).single.id.equals(NotificationChannelManager.kChannelId);
+        check(testBinding.androidNotificationHost.activeChannelGroups).isEmpty();
+      })));
+
+      test('auto-create for Zulip channel, with main channel settings', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        // Simulate the user having changed the main channel's settings.
+        await testBinding.androidNotificationHost.createNotificationChannel(NotificationChannel(
+          id: NotificationChannelManager.kChannelId,
+          name: 'Messages',
+          importance: NotificationImportance.default_,
+          lightsEnabled: false,
+          soundUrl: 'content://media/internal/audio/media/42',
+          vibrationPattern: Int64List.fromList([0, 500])));
+
+        final stream = eg.stream(name: 'design');
+        final message = eg.streamMessage(stream: stream);
+        final data = notifPayloadNewMessage(message, streamName: stream.name);
+        final expectedChannelId = NotificationChannelManager
+          .customChannelIdForChannel(eg.selfAccount, stream.streamId);
+        await receiveNotification(async, data);
+        checkNotification(data,
+          messageStyleMessages: [data],
+          expectedIsGroupConversation: true,
+          expectedTitle: '#design > ${message.topic.displayName}',
+          expectedTagComponent: 'stream:${stream.streamId}:${message.topic.canonicalize()}',
+          expectedChannelId: expectedChannelId);
+
+        check(testBinding.androidNotificationHost.activeChannelGroups).single
+          ..id.equals(expectedGroupId)
+          ..name.equals('${eg.selfAccount.realmName} (${eg.selfAccount.email})');
+        check(testBinding.androidNotificationHost.activeChannels).deepEquals(<Condition<Object?>>[
+          (it) => it.isA<NotificationChannel>().id.equals(NotificationChannelManager.kChannelId),
+          (it) => it.isA<NotificationChannel>()
+            ..id.equals(expectedChannelId)
+            ..name.equals('#design')
+            ..groupId.equals(expectedGroupId)
+            ..importance.equals(NotificationImportance.default_)
+            ..lightsEnabled.equals(false)
+            ..soundUrl.equals('content://media/internal/audio/media/42')
+            ..vibrationPattern.isNotNull().deepEquals([0, 500]),
+        ]);
+      })));
+
+      test('use existing Zulip-channel custom channel even with flag off', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        final stream = eg.stream();
+        final expectedChannelId = NotificationChannelManager
+          .customChannelIdForChannel(eg.selfAccount, stream.streamId);
+        setAutoCreate(true);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: expectedChannelId);
+
+        setAutoCreate(false);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: expectedChannelId);
+      })));
+
+      test('rename Zulip-channel custom channel, keeping its settings', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        final stream = eg.stream(name: 'Before');
+        final expectedChannelId = NotificationChannelManager
+          .customChannelIdForChannel(eg.selfAccount, stream.streamId);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: 'Before', expectedChannelId: expectedChannelId);
+        // Simulate the user choosing a sound for the custom channel.
+        await testBinding.androidNotificationHost.createNotificationChannel(NotificationChannel(
+          id: expectedChannelId,
+          name: '#Before',
+          groupId: expectedGroupId,
+          importance: NotificationImportance.high,
+          soundUrl: 'content://media/internal/audio/media/42'));
+
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: 'After', expectedChannelId: expectedChannelId);
+        check(testBinding.androidNotificationHost.activeChannels).last
+          ..id.equals(expectedChannelId)
+          ..name.equals('#After')
+          ..soundUrl.equals('content://media/internal/audio/media/42');
+      })));
+
+      test('no update custom channel when name unchanged', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        final stream = eg.stream();
+        final expectedChannelId = NotificationChannelManager
+          .customChannelIdForChannel(eg.selfAccount, stream.streamId);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: expectedChannelId);
+        check(testBinding.androidNotificationHost.takeCopiedChannels())
+          .deepEquals([expectedChannelId]);
+
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: expectedChannelId);
+        check(testBinding.androidNotificationHost.takeCopiedChannels()).isEmpty();
+      })));
+
+      test('Zulip channel name unknown: keep existing custom channel name, and no create', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        final stream1 = eg.stream(name: 'design');
+        final channelId1 = NotificationChannelManager
+          .customChannelIdForChannel(eg.selfAccount, stream1.streamId);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream1),
+          streamName: 'design', expectedChannelId: channelId1);
+
+        await receiveAndCheck(async, eg.streamMessage(stream: stream1),
+          streamName: null, expectedChannelId: channelId1);
+        check(testBinding.androidNotificationHost.activeChannels).last
+          ..id.equals(channelId1)
+          ..name.equals('#design');
+
+        final stream2 = eg.stream();
+        await receiveAndCheck(async, eg.streamMessage(stream: stream2),
+          streamName: null, expectedChannelId: null);
+        check(testBinding.androidNotificationHost.activeChannels.map((c) => c.id))
+          .deepEquals([NotificationChannelManager.kChannelId, channelId1]);
+      })));
+
+      test('prefer sender custom channel over Zulip-channel one', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        final senderChannelId = NotificationChannelManager
+          .customChannelIdForSender(eg.selfAccount, eg.otherUser.userId);
+        await addCustomChannel(senderChannelId, name: eg.otherUser.fullName);
+
+        final stream = eg.stream();
+        await receiveAndCheck(async, eg.streamMessage(stream: stream, sender: eg.otherUser),
+          streamName: stream.name, expectedChannelId: senderChannelId);
+        await receiveAndCheck(async, eg.streamMessage(stream: stream, sender: eg.thirdUser),
+          streamName: stream.name,
+          expectedChannelId: NotificationChannelManager
+            .customChannelIdForChannel(eg.selfAccount, stream.streamId));
+      })));
+
+      test('use sender custom channel for DMs', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        final senderChannelId = NotificationChannelManager
+          .customChannelIdForSender(eg.selfAccount, eg.otherUser.userId);
+        await addCustomChannel(senderChannelId, name: eg.otherUser.fullName);
+
+        await receiveAndCheck(async,
+          eg.dmMessage(from: eg.otherUser, to: [eg.selfUser]),
+          expectedChannelId: senderChannelId);
+        await receiveAndCheck(async,
+          eg.dmMessage(from: eg.otherUser, to: [eg.selfUser, eg.thirdUser]),
+          expectedChannelId: senderChannelId);
+        await receiveAndCheck(async,
+          eg.dmMessage(from: eg.thirdUser, to: [eg.selfUser]),
+          expectedChannelId: null);
+      })));
+
+      test('rename sender custom channel when sender renamed', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        final sender = eg.user(fullName: 'Before');
+        final senderChannelId = NotificationChannelManager
+          .customChannelIdForSender(eg.selfAccount, sender.userId);
+        await addCustomChannel(senderChannelId, name: 'Before');
+
+        final renamedSender = eg.user(userId: sender.userId, fullName: 'After');
+        await receiveAndCheck(async,
+          eg.dmMessage(from: renamedSender, to: [eg.selfUser]),
+          expectedChannelId: senderChannelId);
+        check(testBinding.androidNotificationHost.activeChannels).last
+          ..id.equals(senderChannelId)
+          ..name.equals('After');
+      })));
+
+      test('fall back to main channel if creating custom channel fails', () => runWithHttpClient(() => awaitFakeAsync((async) async {
+        await init();
+        setAutoCreate(true);
+        // Creating a custom channel fails without the main channel to copy.
+        await testBinding.androidNotificationHost.deleteNotificationChannel(NotificationChannelManager.kChannelId);
+
+        final stream = eg.stream();
+        await receiveAndCheck(async, eg.streamMessage(stream: stream),
+          streamName: stream.name, expectedChannelId: null);
+        check(testBinding.androidNotificationHost.activeChannels).isEmpty();
+      })));
+    });
+
     test('remove: smoke', () => runWithHttpClient(() => awaitFakeAsync((async) async {
       await init();
       final message = eg.streamMessage();
@@ -1408,9 +1633,15 @@ extension NotificationChannelChecks on Subject<NotificationChannel> {
   Subject<String> get id => has((x) => x.id, 'id');
   Subject<int> get importance => has((x) => x.importance, 'importance');
   Subject<String?> get name => has((x) => x.name, 'name');
+  Subject<String?> get groupId => has((x) => x.groupId, 'groupId');
   Subject<bool?> get lightsEnabled => has((x) => x.lightsEnabled, 'lightsEnabled');
   Subject<String?> get soundUrl => has((x) => x.soundUrl, 'soundUrl');
   Subject<Int64List?> get vibrationPattern => has((x) => x.vibrationPattern, 'vibrationPattern');
+}
+
+extension NotificationChannelGroupChecks on Subject<NotificationChannelGroup> {
+  Subject<String> get id => has((x) => x.id, 'id');
+  Subject<String> get name => has((x) => x.name, 'name');
 }
 
 extension on Subject<AndroidNotificationHostApiNotifyCall> {
