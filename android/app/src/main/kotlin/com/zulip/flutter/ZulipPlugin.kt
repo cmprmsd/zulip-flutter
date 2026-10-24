@@ -185,6 +185,7 @@ private class AndroidNotificationHost(val context: Context)
         contentText: String?,
         contentTitle: String?,
         extras: Map<String, String>?,
+        groupAlertBehavior: Long?,
         groupKey: String?,
         inboxStyle: InboxStyle?,
         isGroupSummary: Boolean?,
@@ -212,6 +213,7 @@ private class AndroidNotificationHost(val context: Context)
             contentTitle?.let { setContentTitle(it) }
             extras?.let { setExtras(
                 Bundle().apply { it.forEach { (k, v) -> putString(k, v) } } ) }
+            groupAlertBehavior?.let { setGroupAlertBehavior(it.toInt()) }
             groupKey?.let { setGroup(it) }
             inboxStyle?.let { setStyle(
                 NotificationCompat.InboxStyle()

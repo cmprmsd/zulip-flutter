@@ -255,6 +255,9 @@ abstract class AndroidNotificationHostApi {
   /// The `color` should be in the form 0xAARRGGBB.
   /// See [ColorExtension.argbInt].
   ///
+  /// The `groupAlertBehavior` must be a valid constant from
+  /// [NotificationGroupAlertBehavior].
+  ///
   /// The `smallIconResourceName` is passed to `android.content.res.Resources.getIdentifier`
   /// to get a resource ID to pass to `Builder.setSmallIcon`.
   /// Whatever name is passed there must appear in keep.xml too:
@@ -278,6 +281,7 @@ abstract class AndroidNotificationHostApi {
     String? contentText,
     String? contentTitle,
     Map<String, String>? extras,
+    int? groupAlertBehavior,
     String? groupKey,
     InboxStyle? inboxStyle,
     bool? isGroupSummary,

@@ -547,6 +547,7 @@ void main() {
               ..deepEquals(<String, String>{
                 NotificationDisplayManager.kExtraLastMessageId: data.messageId.toString(),
               }))
+            ..groupAlertBehavior.isNull()
             ..groupKey.equals(expectedGroupKey)
             ..isGroupSummary.isNull()
             ..inboxStyle.isNull()
@@ -567,6 +568,7 @@ void main() {
             ..color.equals(kZulipBrandColor.argbInt)
             ..smallIconResourceName.equals('zulip_notification')
             ..extras.isNull()
+            ..groupAlertBehavior.equals(NotificationGroupAlertBehavior.children)
             ..groupKey.equals(expectedGroupKey)
             ..isGroupSummary.equals(true)
             ..inboxStyle.which((it) => it.isNotNull()
@@ -1421,6 +1423,7 @@ extension on Subject<AndroidNotificationHostApiNotifyCall> {
   Subject<String?> get contentText => has((x) => x.contentText, 'contentText');
   Subject<String?> get contentTitle => has((x) => x.contentTitle, 'contentTitle');
   Subject<Map<String?, String?>?> get extras => has((x) => x.extras, 'extras');
+  Subject<int?> get groupAlertBehavior => has((x) => x.groupAlertBehavior, 'groupAlertBehavior');
   Subject<String?> get groupKey => has((x) => x.groupKey, 'groupKey');
   Subject<InboxStyle?> get inboxStyle => has((x) => x.inboxStyle, 'inboxStyle');
   Subject<bool?> get isGroupSummary => has((x) => x.isGroupSummary, 'isGroupSummary');

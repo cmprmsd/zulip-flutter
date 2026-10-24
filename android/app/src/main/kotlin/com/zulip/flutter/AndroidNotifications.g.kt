@@ -920,6 +920,9 @@ interface AndroidNotificationHostApi {
    * The `color` should be in the form 0xAARRGGBB.
    * See [ColorExtension.argbInt].
    *
+   * The `groupAlertBehavior` must be a valid constant from
+   * [NotificationGroupAlertBehavior].
+   *
    * The `smallIconResourceName` is passed to `android.content.res.Resources.getIdentifier`
    * to get a resource ID to pass to `Builder.setSmallIcon`.
    * Whatever name is passed there must appear in keep.xml too:
@@ -929,7 +932,7 @@ interface AndroidNotificationHostApi {
    *   https://developer.android.com/reference/kotlin/android/app/NotificationManager.html#notify
    *   https://developer.android.com/reference/androidx/core/app/NotificationCompat.Builder
    */
-  fun notify(tag: String?, id: Long, autoCancel: Boolean?, channelId: String, color: Long?, contentIntent: PendingIntent?, contentText: String?, contentTitle: String?, extras: Map<String, String>?, groupKey: String?, inboxStyle: InboxStyle?, isGroupSummary: Boolean?, messagingStyle: MessagingStyle?, number: Long?, smallIconResourceName: String?)
+  fun notify(tag: String?, id: Long, autoCancel: Boolean?, channelId: String, color: Long?, contentIntent: PendingIntent?, contentText: String?, contentTitle: String?, extras: Map<String, String>?, groupAlertBehavior: Long?, groupKey: String?, inboxStyle: InboxStyle?, isGroupSummary: Boolean?, messagingStyle: MessagingStyle?, number: Long?, smallIconResourceName: String?)
   /**
    * Corresponds to `androidx.core.app.NotificationManagerCompat.getActiveNotifications`,
    * optionally combined with `androidx.core.app.NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification`
@@ -1065,14 +1068,15 @@ interface AndroidNotificationHostApi {
             val contentTextArg = args[6] as String?
             val contentTitleArg = args[7] as String?
             val extrasArg = args[8] as Map<String, String>?
-            val groupKeyArg = args[9] as String?
-            val inboxStyleArg = args[10] as InboxStyle?
-            val isGroupSummaryArg = args[11] as Boolean?
-            val messagingStyleArg = args[12] as MessagingStyle?
-            val numberArg = args[13] as Long?
-            val smallIconResourceNameArg = args[14] as String?
+            val groupAlertBehaviorArg = args[9] as Long?
+            val groupKeyArg = args[10] as String?
+            val inboxStyleArg = args[11] as InboxStyle?
+            val isGroupSummaryArg = args[12] as Boolean?
+            val messagingStyleArg = args[13] as MessagingStyle?
+            val numberArg = args[14] as Long?
+            val smallIconResourceNameArg = args[15] as String?
             val wrapped: List<Any?> = try {
-              api.notify(tagArg, idArg, autoCancelArg, channelIdArg, colorArg, contentIntentArg, contentTextArg, contentTitleArg, extrasArg, groupKeyArg, inboxStyleArg, isGroupSummaryArg, messagingStyleArg, numberArg, smallIconResourceNameArg)
+              api.notify(tagArg, idArg, autoCancelArg, channelIdArg, colorArg, contentIntentArg, contentTextArg, contentTitleArg, extrasArg, groupAlertBehaviorArg, groupKeyArg, inboxStyleArg, isGroupSummaryArg, messagingStyleArg, numberArg, smallIconResourceNameArg)
               listOf(null)
             } catch (exception: Throwable) {
               AndroidNotificationsPigeonUtils.wrapError(exception)

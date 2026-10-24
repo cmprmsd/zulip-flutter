@@ -351,6 +351,9 @@ class NotificationDisplayManager {
       id: kNotificationId,
       tag: groupKey,
       channelId: NotificationChannelManager.kChannelId,
+      // Leave sound and vibration to the conversation's own notification,
+      // which may be on a channel with its own settings.
+      groupAlertBehavior: NotificationGroupAlertBehavior.children,
       groupKey: groupKey,
       isGroupSummary: true,
 
